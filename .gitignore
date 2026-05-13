@@ -1,2 +1,6 @@
 *.img
 *.cctk
+*.o
+lib/bin/
+lib/sbin/
+lib/libc.so

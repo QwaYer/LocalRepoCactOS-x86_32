@@ -23,7 +23,7 @@
 | **Packer** | **`tools/pack_cctkfs.py`** — invoked as **`python3 $(PACKER) lib/ cctkfs.img`** ([`Makefile`](Makefile)) |
 | **Driver slot** | **`lib/*.cctk`** — at least **one** required or **`make`** fails with an explicit error |
 | **Userspace staging** | **`lib/bin/*`** → archive **`/bin/*`** · **`lib/sbin/*`** → **`/sbin/*`** (from **CactUserBins** **`make install`**) |
-| **Dynamic libc** | **`lib/libc.so`** copied from **`../CactLib-x86_32/libc.so`** (target **`libs`**) |
+| **Dynamic libc** | **`lib/libc.so`** — copied from a built **`libc.so`** when **`CACTLIB_DIR`** is passed by the integrator (see **`Makefile`**) |
 | **Bootstrap ELFs** | **`init`** (copy of **cgoct**), **`cactsole`**, **`cgoct`**, **`cactsole-rescue`** (copy of **cactsole**) |
 
 ---
@@ -38,6 +38,7 @@
 | **[Cgoct-x86_32](https://github.com/QwaYer/Cgoct-x86_32)** | **`/bin/init`** — userspace supervisor |
 | **[Cactsole-x86_32](https://github.com/QwaYer/Cactsole-x86_32)** | **`/bin/cactsole`** and **`/bin/cactsole-rescue`** (same binary, two names) |
 | **[CactUserBins-x86_32](https://github.com/QwaYer/CactUserBins-x86_32)** | **`make install`** fills **`lib/bin/`** and **`lib/sbin/`** |
+| **[CactOS-x86_32](https://github.com/QwaYer/CactOS-x86_32)** | **Workspace integrator** — runs **`make`** across libc, shells, userbins, drivers, this packer, kernel, **CactBridge** |
 
 ---
 
@@ -56,40 +57,50 @@ The packer sorts entries by **archive path**, then writes header + entry table +
 
 ## 🔨 Building
 
+**Recommended — full workspace**
+
+From the **parent** of all sibling trees, run **`make`** or **`make -C CactOS-x86_32 iso`** — **[CactOS-x86_32](https://github.com/QwaYer/CactOS-x86_32)** passes **`CACTLIB_DIR`**, **`CACTSOLE_BIN`**, **`CGOCT_BIN`**, **`USERBINS_MK`**, **`CACTSOLEINC`**, **`LR_BIN`**, **`LR_SBIN`** into this **`Makefile`** and repacks **`cctkfs.img`**.
+
+**Standalone — this repository only**
+
+Sibling directories are auto-detected. Just run:
+
+```sh
+make      # auto-detects all siblings + packs cctkfs.img
+```
+
+Override any path if needed (see table below).
+
+| Variable | Meaning |
+|----------|---------|
+| **`CACTLIB_DIR`** | Root of **CactLib-x86_32** (must already contain **`libc.so`**) |
+| **`CACTSOLE_BIN`** | Path to built **`cactsole`** |
+| **`CGOCT_BIN`** | Path to built **`cgoct`** |
+| **`USERBINS_MK`** | Directory of **CactUserBins-x86_32** (for **`make install`**) |
+| **`CACTSOLEINC`** | **`include/`** from **Cactsole-x86_32** |
+| **`LR_BIN`** / **`LR_SBIN`** | Staging dirs (e.g. **`lib/bin`** / **`lib/sbin`** under this repo) |
+
 **Prerequisites**
 
 | Requirement | Notes |
 |-------------|-------|
 | **`python3`** | Runs **`pack_cctkfs.py`** |
 | **`lib/*.cctk`** | **Mandatory** — install drivers first (see table below) |
-| **Sibling trees** | **`../CactLib-x86_32`**, **`../Cgoct-x86_32`**, **`../Cactsole-x86_32`**, **`../CactUserBins-x86_32`** for default **`make all`** |
 
-**Typical driver install names** (examples from this workspace layout):
+**Driver install** (auto-detects siblings by default):
 
-| Driver | Example install |
-|--------|-----------------|
-| AHCI | `make -C ../AHCI-for-Cact install` |
-| NVMe | `make -C ../NVMe-for-Cact install` |
-| virtio-net | `make -C ../Virtio-net-for-Cact install` |
-| Yukon | `make -C ../Yukon-for-Cact install` |
+```sh
+make -C ../AHCI-for-Cact install
+make -C ../NVMe-for-Cact install
+make -C ../Virtio-net-for-Cact install
+make -C ../Yukon-for-Cact install
+```
 
 **Pack the image**
 
 ```sh
-make            # userbins + libs + pack → cctkfs.img
-make userbins   # only rebuild/install ELFs into lib/bin and lib/sbin
-make libs       # refresh lib/libc.so from CactLib
-make clean      # remove cctkfs.img, lib/bin/, lib/sbin/, lib/libc.so
-```
-
-**End-to-end with the kernel ISO**
-
-```sh
-make -C ../LocalRepoCactOS
-make -C ../CactKernel-x86_32
-```
-
-The kernel build copies **`cctkfs.img`** into **`build/isodir/boot/`** when present; **`grub.cfg`** loads it with **`module2 /boot/cctkfs.img cctkfs`**.
+make      # auto-detects all paths
+make clean
 
 ---
 
@@ -97,7 +108,7 @@ The kernel build copies **`cctkfs.img`** into **`build/isodir/boot/`** when pres
 
 ```
 LocalRepoCactOS/
-├── Makefile              # wires CactLib / cgoct / cactsole / CactUserBins
+├── Makefile              # requires CACTLIB_DIR, paths from integrator (CactOS)
 ├── LICENSE
 ├── tools/
 │   ├── cctkfs.h          # on-disk layout (shared idea with kernel reader)
@@ -136,7 +147,7 @@ LocalRepoCactOS/
    - implements **`make install`** copying into **`$(LOCAL_REPO)/lib/`**.
 2. (Optional) mirror sources under **`src/<Name>-for-Cact/`**.
 3. Teach **GDD** in **`CactKernel-x86_32/.../pci_gdd.c`** to recognise the PCI class tuple.
-4. **`make -C <Name>-for-Cact install && make`** here, then rebuild the kernel.
+4. **`make -C <Name>-for-Cact KERN_ROOT=… LOCAL_REPO=… install`**, then **`make`** in **LocalRepoCactOS** with integrator variables — or run **`make`** from **CactOS-x86_32**.
 
 ---
 
