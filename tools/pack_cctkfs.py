@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 """Pack LocalRepoCactOS/lib into a flat cctkfs image consumed by the Cact
-kernel.  Includes:
-  - lib/*.cctk  → archive path /lib/<name>.cctk  (PCI driver modules)
-  - lib/*.so    → archive path /lib/<name>.so    (shared libraries; served
-                  by libfs as cctkfs-overlay)
-  - lib/bin/*   → /bin/<name>   (user ELF — binfs + pci_modblob)
-  - lib/sbin/*  → /sbin/<name> (priv/net tools — sbinfs + pci_modblob)
+kernel.
+
+Directory layout (lib_dir):
+  lib/*.cctk        → /lib/<name>.cctk    (PCI driver modules)
+  lib/*.so          → /lib/<name>.so      (shared libraries)
+  lib/*.o           → /lib/<name>.o       (object files, e.g. start.o)
+  lib/*.a           → /lib/<name>.a       (static archives)
+  lib/bin/*         → /bin/<name>         (user ELF)
+  lib/sbin/*        → /sbin/<name>        (priv/net tools)
+  lib/<rest>        → /<rest>             (anything else, e.g. include/, usr/)
 
 Layout matches tools/cctkfs.h (little-endian, contiguous):
   cctkfs_hdr (32 B)
@@ -30,6 +34,27 @@ def align_up(n, a):
     return (n + a - 1) & ~(a - 1)
 
 
+def archive_path(lib_dir: Path, path: Path) -> str:
+    """Map a file under lib_dir to its archive path in cctkfs."""
+    rel = path.relative_to(lib_dir)
+    parts = rel.parts
+
+    # lib/bin/<name>  →  /bin/<name>
+    if len(parts) >= 2 and parts[0] == "bin":
+        return f"/bin/{'/'.join(parts[1:])}"
+
+    # lib/sbin/<name>  →  /sbin/<name>
+    if len(parts) >= 2 and parts[0] == "sbin":
+        return f"/sbin/{'/'.join(parts[1:])}"
+
+    # lib/<name>.cctk, lib/<name>.so, lib/<name>.o, lib/<name>.a  →  /lib/<name>
+    if len(parts) == 1:
+        return f"/lib/{path.name}"
+
+    # lib/<rest>  →  /lib/<rest>
+    return f"/lib/{'/'.join(parts)}"
+
+
 def main(argv):
     if len(argv) != 3:
         print("usage: pack_cctkfs.py <lib_dir> <out_image>", file=sys.stderr)
@@ -39,42 +64,31 @@ def main(argv):
     out_path = Path(argv[2])
 
     staged = []
-    for pattern in ("*.cctk", "*.so"):
-        for path in sorted(lib_dir.glob(pattern)):
-            archive_name = f"/lib/{path.name}".encode("utf-8")
-            staged.append((archive_name, path))
-    bin_dir = lib_dir / "bin"
-    if bin_dir.is_dir():
-        for path in sorted(bin_dir.iterdir()):
-            if path.is_file():
-                archive_name = f"/bin/{path.name}".encode("utf-8")
-                staged.append((archive_name, path))
-    sbin_dir = lib_dir / "sbin"
-    if sbin_dir.is_dir():
-        for path in sorted(sbin_dir.iterdir()):
-            if path.is_file():
-                archive_name = f"/sbin/{path.name}".encode("utf-8")
-                staged.append((archive_name, path))
+
+    # Walk the entire lib_dir tree
+    for path in sorted(lib_dir.rglob("*")):
+        if not path.is_file():
+            continue
+        arcpath = archive_path(lib_dir, path)
+        staged.append((arcpath.encode("utf-8"), path))
+
     staged.sort(key=lambda t: t[0])
 
     if not staged:
-        print(f"error: no .cctk/.so in {lib_dir} and no lib/bin/ or lib/sbin/ files",
-              file=sys.stderr)
+        print(f"error: no files found in {lib_dir}", file=sys.stderr)
         return 1
 
-    # Archive paths match pci_modblob_get() lookups, e.g. "/lib/foo.cctk",
-    # "/bin/cactsole".
     entries = []
     name_blob = bytearray()
-    for archive_name, path in staged:
+    for archive_name_bytes, path in staged:
         name_off = len(name_blob)
-        name_blob += archive_name
+        name_blob += archive_name_bytes
         name_blob += b"\x00"
         entries.append({
             "path": path,
-            "arcname": archive_name.decode("utf-8"),
+            "arcname": archive_name_bytes.decode("utf-8"),
             "name_off": name_off,
-            "name_len": len(archive_name),
+            "name_len": len(archive_name_bytes),
             "data": path.read_bytes(),
         })
 
@@ -115,7 +129,7 @@ def main(argv):
 
     print(f"cctkfs: wrote {out_path} ({total_size} bytes, {len(entries)} entries)")
     for e in entries:
-        print(f"  {e['arcname']:32s} @ {e['data_off']:#08x}  {len(e['data'])} B")
+        print(f"  {e['arcname']:48s} @ {e['data_off']:#08x}  {len(e['data'])} B")
     return 0
 
 

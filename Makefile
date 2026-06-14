@@ -1,6 +1,7 @@
 CACTLIB_DIR ?= $(abspath ../CactLib-x86_32)
 CACTSOLE_BIN ?= $(abspath ../Cactsole-x86_32/cactsole)
 CGOCT_BIN ?= $(abspath ../Cgoct-x86_32/cgoct)
+XFBDEV_BIN ?= $(abspath ../CactXfbdev-x86_32/build/xfbdev)
 USERBINS_MK ?= $(abspath ../CactUserBins-x86_32)
 CACTSOLEINC ?= $(abspath ../Cactsole-x86_32/include)
 LR_BIN ?= $(abspath lib/bin)
@@ -36,15 +37,17 @@ LIB_DIR     := lib
 BIN_STAGING := $(LIB_DIR)/bin
 OUT_IMG     := cctkfs.img
 PACKER      := tools/pack_cctkfs.py
+SIGNER      := tools/cact_sign.py
 
 LIBC_SO_SRC  := $(CACTLIB_DIR)/libc.so
 
 CCTK_FILES := $(wildcard $(LIB_DIR)/*.cctk)
 BIN_ELFS   := $(BIN_STAGING)/init $(BIN_STAGING)/cactsole $(BIN_STAGING)/cgoct \
               $(BIN_STAGING)/cactsole-rescue
+SBIN_ELFS  := $(LR_SBIN)/xfbdev
 LIB_SOS    := $(LIB_DIR)/libc.so
 
-.PHONY: all clean userbins libs cactuserbins
+.PHONY: all clean userbins libs cactuserbins xfbdev
 
 all: $(OUT_IMG)
 
@@ -55,9 +58,11 @@ cactuserbins:
 		LR_BIN="$(LR_BIN)" \
 		LR_SBIN="$(LR_SBIN)"
 
-userbins: cactuserbins $(BIN_ELFS)
+userbins: cactuserbins $(BIN_ELFS) $(SBIN_ELFS)
 
-all: $(OUT_IMG)
+$(LR_SBIN)/xfbdev: $(XFBDEV_BIN)
+	@mkdir -p $(LR_SBIN)
+	cp -f $< $@
 
 libs: $(LIB_SOS)
 
@@ -81,11 +86,12 @@ $(BIN_STAGING)/cactsole-rescue: $(CACTSOLE_BIN)
 	@mkdir -p $(BIN_STAGING)
 	cp -f $< $@
 
-$(OUT_IMG): $(PACKER) userbins libs $(CCTK_FILES)
+$(OUT_IMG): $(PACKER) $(SIGNER) userbins libs $(CCTK_FILES)
 	@if [ -z "$(CCTK_FILES)" ]; then \
 		echo "ERROR: no $(LIB_DIR)/*.cctk — install kernel modules first"; \
 		exit 1; \
 	fi
+	for f in $(CCTK_FILES); do python3 $(SIGNER) $$f; done
 	python3 $(PACKER) $(LIB_DIR) $@
 
 clean:
