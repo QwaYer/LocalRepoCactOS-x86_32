@@ -12,7 +12,7 @@
 <p align="center">
   Staging tree for <strong>out-of-tree PCI drivers</strong> (<strong><code>*.cctk</code></strong>) and <strong>early userspace</strong> ELFs, packed into one <strong><code>cctkfs.img</code></strong> archive.<br>
   GRUB loads it as a <strong>Multiboot2</strong> <strong><code>module2</code></strong>; the <strong>Cact</strong> kernel copies it into RAM <strong>before paging</strong> and overlays <strong><code>/lib</code></strong>, <strong><code>/bin</code></strong>, and <strong><code>/sbin</code></strong> on top of disk-backed VFS.<br>
-  <strong>2.0.0:</strong> all modules are now signed with <strong>HMAC-SHA256</strong> using the kernel's embedded static key. The packer (<code>pack_cctkfs.py</code>) appends the signature to each <code>*.cctk</code> entry; the kernel verifies it before loading via <code>pci_load_module</code>.
+  <strong>2.0.0:</strong> all `.cctk` modules are now signed with <strong>HMAC-SHA256</strong> using the kernel's embedded static key. The last 32 bytes of each `.cctk` entry is the HMAC tag; the kernel verifies it before loading via `pci_load_module` (`pci_loader.c:111` `hmac_verify_module()`, Rust crate `cact_crypto`).
 </p>
 
 ---
