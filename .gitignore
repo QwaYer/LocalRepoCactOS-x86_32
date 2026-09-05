@@ -3,4 +3,4 @@
 *.o
 lib/bin/
 lib/sbin/
-lib/libc.so
+lib/clibc.so

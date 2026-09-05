@@ -25,7 +25,7 @@
 | **Packer** | **`tools/pack_cctkfs.py`** — invoked as **`python3 $(PACKER) lib/ cctkfs.img`** ([`Makefile`](Makefile)) |
 | **Driver slot** | **`lib/*.cctk`** — at least **one** required or **`make`** fails with an explicit error |
 | **Userspace staging** | **`lib/bin/*`** → archive **`/bin/*`** · **`lib/sbin/*`** → **`/sbin/*`** (from **CactUserBins** **`make install`**) |
-| **Dynamic libc** | **`lib/libc.so`** — copied from a built **`libc.so`** when **`CACTLIB_DIR`** is passed by the integrator (see **`Makefile`**) |
+| **Dynamic libc** | **`lib/clibc.so`** — copied from a built **`clibc.so`** when **`CACTLIB_DIR`** is passed by the integrator (see **`Makefile`**) |
 | **Bootstrap ELFs** | **`init`** (copy of **cgoct**), **`cactsole`**, **`cgoct`**, **`cactsole-rescue`** (copy of **cactsole**) |
 
 ---
@@ -36,7 +36,7 @@
 |-------|------|
 | **[CactKernel-x86_32](https://github.com/QwaYer/CactKernel-x86_32)** | Parses the **`cctkfs`** module, stages **`cctkfs_stage[]`**, serves **GDD** / **pci_load_module**, **binfs** / **sbinfs** / **libfs** overlays |
 | **`*-for-Cact` driver repos** | Each **`make install`** drops **`*.cctk`** into **`lib/`** here |
-| **[CactLib-x86_32](https://github.com/QwaYer/CactLib-x86_32)** | Builds **`libc.so`** consumed by staged ELFs |
+| **[CactLib-x86_32](https://github.com/QwaYer/CactLib-x86_32)** | Builds **`clibc.so`** consumed by staged ELFs |
 | **[Cgoct-x86_32](https://github.com/QwaYer/Cgoct-x86_32)** | **`/bin/init`** — userspace supervisor |
 | **[Cactsole-x86_32](https://github.com/QwaYer/Cactsole-x86_32)** | **`/bin/cactsole`** and **`/bin/cactsole-rescue`** (same binary, two names) |
 | **[CactUserBins-x86_32](https://github.com/QwaYer/CactUserBins-x86_32)** | **`make install`** fills **`lib/bin/`** and **`lib/sbin/`** |
@@ -49,7 +49,7 @@
 | Source under `lib/` | Path inside the archive | Purpose |
 |---------------------|-------------------------|---------|
 | **`*.cctk`** | **`/lib/<name>.cctk`** | Relocatable **PCI** driver blobs (**ET_REL**), loaded via **GDD** |
-| **`*.so`** | **`/lib/<name>.so`** | Shared libs (**libfs** overlay), e.g. **`libc.so`** |
+| **`*.so`** | **`/lib/<name>.so`** | Shared libs (**libfs** overlay), e.g. **`clibc.so`** |
 | **`bin/*`** | **`/bin/<name>`** | **init**, **cactsole**, **cgoct**, **cactsole-rescue**, plus all **CactUserBins** tools |
 | **`sbin/*`** | **`/sbin/<name>`** | Privileged / net helpers (**kill**, **su**, **modload**, **ping**, …) |
 
@@ -75,7 +75,7 @@ Override any path if needed (see table below).
 
 | Variable | Meaning |
 |----------|---------|
-| **`CACTLIB_DIR`** | Root of **CactLib-x86_32** (must already contain **`libc.so`**) |
+| **`CACTLIB_DIR`** | Root of **CactLib-x86_32** (must already contain **`clibc.so`**) |
 | **`CACTSOLE_BIN`** | Path to built **`cactsole`** |
 | **`CGOCT_BIN`** | Path to built **`cgoct`** |
 | **`USERBINS_MK`** | Directory of **CactUserBins-x86_32** (for **`make install`**) |
@@ -117,7 +117,7 @@ LocalRepoCactOS/
 │   └── pack_cctkfs.py    # packs lib/ → cctkfs.img
 ├── lib/                  # populated by driver installs + make targets
 │   ├── *.cctk
-│   ├── libc.so
+│   ├── clibc.so
 │   ├── bin/
 │   └── sbin/
 ├── src/                  # optional mirrors of driver sources

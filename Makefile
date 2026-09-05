@@ -1,4 +1,4 @@
-CACTLIB_DIR ?= $(abspath ../CactLib-x86_32)
+CACTLIB_DIR ?= $(abspath ../CactLibc-x86_32)
 CACTSOLE_BIN ?= $(abspath ../Cactsole-x86_32/cactsole)
 CGOCT_BIN ?= $(abspath ../Cgoct-x86_32/cgoct)
 XFBDEV_BIN ?= $(abspath ../CactXfbdev-x86_32/build/xfbdev)
@@ -39,15 +39,20 @@ OUT_IMG     := cctkfs.img
 PACKER      := tools/pack_cctkfs.py
 SIGNER      := tools/cact_sign.py
 
-LIBC_SO_SRC  := $(CACTLIB_DIR)/libc.so
+LIBC_SO_SRC  := $(CACTLIB_DIR)/clibc.so
+LD_SO_SRC    := $(CACTLIB_DIR)/ld.so
 
 CCTK_FILES := $(wildcard $(LIB_DIR)/*.cctk)
 BIN_ELFS   := $(BIN_STAGING)/init $(BIN_STAGING)/cactsole $(BIN_STAGING)/cgoct \
               $(BIN_STAGING)/cactsole-rescue
+# xfbdev (framebuffer compositor) is optional — only added if a built binary exists.
+SBIN_ELFS  :=
+ifneq ($(wildcard $(XFBDEV_BIN)),)
 SBIN_ELFS  := $(LR_SBIN)/xfbdev
-LIB_SOS    := $(LIB_DIR)/libc.so
+endif
+LIB_SOS    := $(LIB_DIR)/clibc.so $(LIB_DIR)/ld.so
 
-.PHONY: all clean userbins libs cactuserbins xfbdev
+.PHONY: all clean userbins libs cactuserbins xfbdev cactpkg
 
 all: $(OUT_IMG)
 
@@ -58,7 +63,22 @@ cactuserbins:
 		LR_BIN="$(LR_BIN)" \
 		LR_SBIN="$(LR_SBIN)"
 
-userbins: cactuserbins $(BIN_ELFS) $(SBIN_ELFS)
+# CactPkg (пакетный менеджер) — опциональный sibling: бинарь в /sbin,
+# офлайн-репозиторий в /lib/cactpkg/repo. Присутствует в образе, только
+# если каталог ../CactPkg-x86_32 существует.
+CACTPKG_MK ?= $(abspath ../CactPkg-x86_32)
+ifneq ($(wildcard $(CACTPKG_MK)/Makefile),)
+CACTPKG_TARGET := cactpkg
+endif
+
+cactpkg:
+	@echo "  CACTPKG  $(CACTPKG_MK)"
+	$(MAKE) -s -C $(CACTPKG_MK) install \
+		CACTLIB="$(CACTLIB_DIR)" \
+		LR_SBIN="$(LR_SBIN)" \
+		LR_LIB="$(abspath $(LIB_DIR))"
+
+userbins: cactuserbins $(CACTPKG_TARGET) $(BIN_ELFS) $(SBIN_ELFS)
 
 $(LR_SBIN)/xfbdev: $(XFBDEV_BIN)
 	@mkdir -p $(LR_SBIN)
@@ -66,7 +86,11 @@ $(LR_SBIN)/xfbdev: $(XFBDEV_BIN)
 
 libs: $(LIB_SOS)
 
-$(LIB_DIR)/libc.so: $(LIBC_SO_SRC)
+$(LIB_DIR)/clibc.so: $(LIBC_SO_SRC)
+	@mkdir -p $(LIB_DIR)
+	cp -f $< $@
+
+$(LIB_DIR)/ld.so: $(LD_SO_SRC)
 	@mkdir -p $(LIB_DIR)
 	cp -f $< $@
 
