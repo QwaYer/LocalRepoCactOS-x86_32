@@ -52,7 +52,7 @@ SBIN_ELFS  := $(LR_SBIN)/xfbdev
 endif
 LIB_SOS    := $(LIB_DIR)/clibc.so $(LIB_DIR)/ld.so
 
-.PHONY: all clean userbins libs cactuserbins xfbdev cactpkg
+.PHONY: all clean userbins libs cactuserbins xfbdev cactpkg networkd dhcpd
 
 all: $(OUT_IMG)
 
@@ -71,6 +71,24 @@ ifneq ($(wildcard $(CACTPKG_MK)/Makefile),)
 CACTPKG_TARGET := cactpkg
 endif
 
+# Сетевые демоны (networkd/dhcpd) — опциональные sibling-репозитории.
+# В образ попадают, только если каталог с Makefile существует.
+NETWORKD_MK ?= $(abspath ../Cact-networkd-x86_32)
+ifneq ($(wildcard $(NETWORKD_MK)/Makefile),)
+NETWORKD_TARGET := networkd
+endif
+DHCPD_MK ?= $(abspath ../Cact-dhcpd-x86_32)
+ifneq ($(wildcard $(DHCPD_MK)/Makefile),)
+DHCPD_TARGET := dhcpd
+endif
+
+# Системные демоны (logd/devd/netd/powerd/quirkd/resolved/seatd/audiod/wifid) —
+# опциональные sibling-репозитории Cact-<name>-x86_32. Каждый ставит свой
+# бинарь через `make install` в $(LR_SBIN). Демоны поднимаются супервизором
+# cgoct (см. Cgoct-x86_32, ключ services в /etc/cgoct.conf).
+CACT_DAEMONS  := logd devd netd powerd quirkd resolved seatd audiod wifid
+DAEMON_NAMES  := $(foreach d,$(CACT_DAEMONS),$(if $(wildcard ../Cact-$(d)-x86_32/Makefile),daemon-$(d)))
+
 cactpkg:
 	@echo "  CACTPKG  $(CACTPKG_MK)"
 	$(MAKE) -s -C $(CACTPKG_MK) install \
@@ -78,7 +96,25 @@ cactpkg:
 		LR_SBIN="$(LR_SBIN)" \
 		LR_LIB="$(abspath $(LIB_DIR))"
 
-userbins: cactuserbins $(CACTPKG_TARGET) $(BIN_ELFS) $(SBIN_ELFS)
+networkd:
+	@echo "  NETWORKD $(NETWORKD_MK)"
+	$(MAKE) -s -C $(NETWORKD_MK) install \
+		CACTLIB="$(CACTLIB_DIR)" \
+		LR_SBIN="$(LR_SBIN)"
+
+dhcpd:
+	@echo "  DHCPD    $(DHCPD_MK)"
+	$(MAKE) -s -C $(DHCPD_MK) install \
+		CACTLIB="$(CACTLIB_DIR)" \
+		LR_SBIN="$(LR_SBIN)"
+
+daemon-%:
+	@echo "  DAEMON   ../Cact-$*-x86_32"
+	$(MAKE) -s -C ../Cact-$*-x86_32 install \
+		CACTLIB="$(CACTLIB_DIR)" \
+		LR_SBIN="$(LR_SBIN)"
+
+userbins: cactuserbins $(CACTPKG_TARGET) $(NETWORKD_TARGET) $(DHCPD_TARGET) $(DAEMON_NAMES) $(BIN_ELFS) $(SBIN_ELFS)
 
 $(LR_SBIN)/xfbdev: $(XFBDEV_BIN)
 	@mkdir -p $(LR_SBIN)
