@@ -52,7 +52,7 @@ SBIN_ELFS  := $(LR_SBIN)/xfbdev
 endif
 LIB_SOS    := $(LIB_DIR)/clibc.so $(LIB_DIR)/ld.so
 
-.PHONY: all clean userbins libs cactuserbins xfbdev cactpkg networkd dhcpd
+.PHONY: all clean userbins libs cactuserbins cact-install xfbdev cactpkg networkd dhcpd
 
 all: $(OUT_IMG)
 
@@ -69,6 +69,14 @@ cactuserbins:
 CACTPKG_MK ?= $(abspath ../CactPkg-x86_32)
 ifneq ($(wildcard $(CACTPKG_MK)/Makefile),)
 CACTPKG_TARGET := cactpkg
+endif
+
+# cact-install (wizard установщика) — опциональный sibling, ставит
+# /sbin/cact-install. Медиа-пейлоад (kernel.bin/cctkfs.img/grub) в /lib
+# добавляется отдельно: make -C ../Cact-install-x86_32 stage-media
+CACTINST_MK ?= $(abspath ../Cact-install-x86_32)
+ifneq ($(wildcard $(CACTINST_MK)/Makefile),)
+CACTINST_TARGET := cact-install
 endif
 
 # Сетевые демоны (networkd/dhcpd) — опциональные sibling-репозитории.
@@ -96,6 +104,12 @@ cactpkg:
 		LR_SBIN="$(LR_SBIN)" \
 		LR_LIB="$(abspath $(LIB_DIR))"
 
+cact-install:
+	@echo "  CACTINST ../Cact-install-x86_32"
+	$(MAKE) -s -C $(CACTINST_MK) install \
+		CACTLIB="$(CACTLIB_DIR)" \
+		LR_SBIN="$(LR_SBIN)"
+
 networkd:
 	@echo "  NETWORKD $(NETWORKD_MK)"
 	$(MAKE) -s -C $(NETWORKD_MK) install \
@@ -114,7 +128,7 @@ daemon-%:
 		CACTLIB="$(CACTLIB_DIR)" \
 		LR_SBIN="$(LR_SBIN)"
 
-userbins: cactuserbins $(CACTPKG_TARGET) $(NETWORKD_TARGET) $(DHCPD_TARGET) $(DAEMON_NAMES) $(BIN_ELFS) $(SBIN_ELFS)
+userbins: cactuserbins $(CACTINST_TARGET) $(CACTPKG_TARGET) $(NETWORKD_TARGET) $(DHCPD_TARGET) $(DAEMON_NAMES) $(BIN_ELFS) $(SBIN_ELFS)
 
 $(LR_SBIN)/xfbdev: $(XFBDEV_BIN)
 	@mkdir -p $(LR_SBIN)
