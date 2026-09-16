@@ -22,10 +22,10 @@
 | | |
 |---|---|
 | **Output image** | **`cctkfs.img`** — flat archive, magic **`CKFS`** / version **1** ([`tools/cctkfs.h`](tools/cctkfs.h)) |
-| **Packer** | **`tools/pack_cctkfs.py`** — invoked as **`python3 $(PACKER) lib/ cctkfs.img`** ([`Makefile`](Makefile)) |
-| **Driver slot** | **`lib/*.cctk`** — at least **one** required or **`make`** fails with an explicit error |
-| **Userspace staging** | **`lib/bin/*`** → archive **`/bin/*`** · **`lib/sbin/*`** → **`/sbin/*`** (from **CactUserBins** **`make install`**) |
-| **Dynamic libc** | **`lib/clibc.so`** — copied from a built **`clibc.so`** when **`CACTLIB_DIR`** is passed by the integrator (see **`Makefile`**) |
+| **Packer** | **`tools/pack_cctkfs.py`** — invoked as **`python3 tools/pack_cctkfs.py lib/ cctkfs.img`** ([`meson.build`](meson.build)) |
+| **Driver slot** | **`lib/*.cctk`** — at least **one** required or the **`stage`** target fails with an explicit error |
+| **Userspace staging** | **`lib/bin/*`** → archive **`/bin/*`** · **`lib/sbin/*`** → **`/sbin/*`** (from **CactUserBins** **`stage`**) |
+| **Dynamic libc** | **`lib/clibc.so`** — copied from **`<cactlib_dir>/build-meson/clibc.so`** (the **`cactlib_dir`** option, set by the integrator) |
 | **Bootstrap ELFs** | **`init`** (copy of **cgoct**), **`cactsole`**, **`cgoct`**, **`cactsole-rescue`** (copy of **cactsole**) |
 
 ---
@@ -61,7 +61,7 @@ The packer sorts entries by **archive path**, then writes header + entry table +
 
 **Recommended — full workspace**
 
-From the **parent** of all sibling trees, run **`make`** or **`make -C CactOS-x86_32 iso`** — **[CactOS-x86_32](https://github.com/QwaYer/CactOS-x86_32)** passes **`CACTLIB_DIR`**, **`CACTSOLE_BIN`**, **`CGOCT_BIN`**, **`USERBINS_MK`**, **`CACTSOLEINC`**, **`LR_BIN`**, **`LR_SBIN`** into this **`Makefile`** and repacks **`cctkfs.img`**.
+From the **parent** of all sibling trees, run **`ninja -C CactOS-x86_32/build-meson stage`** (or **`… iso`**) — **[CactOS-x86_32](https://github.com/QwaYer/CactOS-x86_32)** configures this project with **`-Dcactlib_dir`**, **`-Dcactsole_bin`**, **`-Dcgoct_bin`**, **`-Duserbins_mk`**, **`-Dcactsoleinc`** and runs its **`stage`** target, which repacks **`cctkfs.img`**.
 
 **Standalone — this repository only**
 
@@ -110,7 +110,7 @@ make clean
 
 ```
 LocalRepoCactOS/
-├── Makefile              # requires CACTLIB_DIR, paths from integrator (CactOS)
+├── meson.build           # sibling paths arrive as -D options; stage/purge targets
 ├── LICENSE
 ├── tools/
 │   ├── cctkfs.h          # on-disk layout (shared idea with kernel reader)
@@ -143,13 +143,13 @@ LocalRepoCactOS/
 
 ## ➕ Adding a new PCI driver
 
-1. Create a sibling repo **`<Name>-for-Cact`** whose **`Makefile`**:
-   - compiles **`<name>_mod.c`** with **`-ffreestanding -fno-pie -m32`**,
-   - emits **`<name>.cctk`** (relocatable object renamed),
-   - implements **`make install`** copying into **`$(LOCAL_REPO)/lib/`**.
+1. Create a sibling repo **`<Name>-for-Cact-x86_32`** whose **`meson.build`**:
+   - compiles **`<name>_mod.c`** with **`-ffreestanding -fno-pie -m32 -mno-mmx -mno-sse -mno-sse2`** (ring-0 code must not use SSE),
+   - emits **`<name>.cctk`** (relocatable object),
+   - exposes a **`stage`** run_target copying it into **`-Dlocal_repo=<…>/lib/`**.
 2. (Optional) mirror sources under **`src/<Name>-for-Cact/`**.
 3. Teach **GDD** in **`CactKernel-x86_32/.../pci_gdd.c`** to recognise the PCI class tuple.
-4. **`make -C <Name>-for-Cact KERN_ROOT=… LOCAL_REPO=… install`**, then **`make`** in **LocalRepoCactOS** with integrator variables — or run **`make`** from **CactOS-x86_32**.
+4. **`ninja -C <Name>-for-Cact-x86_32/build-meson stage`**, then **`ninja -C LocalRepoCactOS-x86_32/build-meson stage`** with the integrator options — or just run **`ninja -C CactOS-x86_32/build-meson drivers`**.
 
 ---
 

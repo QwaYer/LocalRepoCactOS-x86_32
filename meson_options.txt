@@ -1,0 +1,14 @@
+option('cactlib_dir', type: 'string', value: '../CactLibc-x86_32',
+  description: 'CactLibc project root (built with Meson), relative or absolute')
+
+option('cactsole_bin', type: 'string', value: '../Cactsole-x86_32/build-meson/cactsole',
+  description: 'built cactsole binary, relative or absolute')
+
+option('cgoct_bin', type: 'string', value: '../Cgoct-x86_32/build-meson/cgoct',
+  description: 'built cgoct binary (staged as /bin/init and /bin/cgoct), relative or absolute')
+
+option('userbins_mk', type: 'string', value: '../CactUserBins-x86_32',
+  description: 'CactUserBins project root, relative or absolute')
+
+option('cactsoleinc', type: 'string', value: '../Cactsole-x86_32/include',
+  description: 'Cactsole include/ directory (shell headers), relative or absolute')
