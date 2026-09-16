@@ -4,3 +4,5 @@
 lib/bin/
 lib/sbin/
 lib/clibc.so
+
+build-meson/
