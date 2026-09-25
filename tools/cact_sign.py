@@ -12,6 +12,7 @@ kernel's Rust cact_hmac_verify(). Generate it with:
 
 import os
 import sys
+from pathlib import Path
 import hmac
 import hashlib
 
@@ -58,7 +59,7 @@ def main():
         elf_body = data[:-TAG_SIZE]
         stored_tag = data[-TAG_SIZE:]
         if sign(elf_body) == stored_tag:
-            print(f"  [{path}]: already signed, OK")
+            print(f"cact_sign: {Path(path).name} — already signed")
             sys.exit(0)
 
     tag = sign(data)
@@ -66,7 +67,7 @@ def main():
     with open(path, "ab") as f:
         f.write(tag)
 
-    print(f"signed: {path}  tag={tag.hex()}")
+    print(f"cact_sign: {Path(path).name} — signed (tag {tag.hex()[:8]})")
     sys.exit(0)
 
 
