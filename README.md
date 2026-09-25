@@ -22,7 +22,7 @@
 | | |
 |---|---|
 | **Output image** | **`cctkfs.img`** — flat archive, magic **`CKFS`** / version **1** ([`tools/cctkfs.h`](tools/cctkfs.h)) |
-| **Packer** | **`tools/pack_cctkfs.py`** — invoked as **`python3 tools/pack_cctkfs.py lib/ cctkfs.img`** ([`meson.build`](meson.build)) |
+| **Packer** | **`tools/pack_cctkfs.py`** — `python3 tools/pack_cctkfs.py [-v] lib/ cctkfs.img`; a live progress bar on a terminal, a line per 10% when the output is captured, and the full file table with **`-v`** ([`meson.build`](meson.build)) |
 | **Driver slot** | **`lib/*.cctk`** — at least **one** required or the **`stage`** target fails with an explicit error |
 | **Userspace staging** | **`lib/bin/*`** → archive **`/bin/*`** · **`lib/sbin/*`** → **`/sbin/*`** (from **CactUserBins** **`stage`**) |
 | **Dynamic libc** | **`lib/clibc.so`** — copied from **`<cactlib_dir>/build-meson/clibc.so`** (the **`cactlib_dir`** option, set by the integrator) |
@@ -35,12 +35,12 @@
 | Piece | Role |
 |-------|------|
 | **[CactKernel-x86_32](https://github.com/QwaYer/CactKernel-x86_32)** | Parses the **`cctkfs`** module, stages **`cctkfs_stage[]`**, serves **GDD** / **pci_load_module**, **binfs** / **sbinfs** / **libfs** overlays |
-| **`*-for-Cact` driver repos** | Each **`make install`** drops **`*.cctk`** into **`lib/`** here |
-| **[CactLib-x86_32](https://github.com/QwaYer/CactLib-x86_32)** | Builds **`clibc.so`** consumed by staged ELFs |
+| **`*-for-Cact` driver repos** | Each **`ninja -C build-meson stage`** drops **`*.cctk`** into **`lib/`** here |
+| **[CactLib-x86_32](https://github.com/QwaYer/CactLibc-x86_32)** | Builds **`clibc.so`** consumed by staged ELFs |
 | **[Cgoct-x86_32](https://github.com/QwaYer/Cgoct-x86_32)** | **`/bin/init`** — userspace supervisor |
 | **[Cactsole-x86_32](https://github.com/QwaYer/Cactsole-x86_32)** | **`/bin/cactsole`** and **`/bin/cactsole-rescue`** (same binary, two names) |
-| **[CactUserBins-x86_32](https://github.com/QwaYer/CactUserBins-x86_32)** | **`make install`** fills **`lib/bin/`** and **`lib/sbin/`** |
-| **[CactOS-x86_32](https://github.com/QwaYer/CactOS-x86_32)** | **Workspace integrator** — runs **`make`** across libc, shells, userbins, drivers, this packer, kernel, **CactBridge** |
+| **[CactUserBins-x86_32](https://github.com/QwaYer/CactUserBins-x86_32)** | **`ninja -C build-meson stage`** fills **`lib/bin/`** and **`lib/sbin/`** |
+| **[CactOS-x86_32](https://github.com/QwaYer/CactOS-x86_32)** | **Workspace integrator** — drives **`ninja`** across libc, shells, userbins, drivers, this packer, kernel, **CactBridge** |
 
 ---
 
@@ -50,6 +50,7 @@
 |---------------------|-------------------------|---------|
 | **`*.cctk`** | **`/lib/<name>.cctk`** | Relocatable **PCI** driver blobs (**ET_REL**), loaded via **GDD** |
 | **`*.so`** | **`/lib/<name>.so`** | Shared libs (**libfs** overlay), e.g. **`clibc.so`** |
+| **`ca-certificates.crt`** | **`/lib/ca-certificates.crt`** | Default **CA bundle** for the libc TLS client (libc looks in **`/etc/ca-certificates.crt`** first and falls back to this copy) |
 | **`bin/*`** | **`/bin/<name>`** | **init**, **cactsole**, **cgoct**, **cactsole-rescue**, plus all **CactUserBins** tools |
 | **`sbin/*`** | **`/sbin/<name>`** | Privileged / net helpers (**kill**, **su**, **modload**, **ping**, …) |
 
@@ -65,44 +66,47 @@ From the **parent** of all sibling trees, run **`ninja -C CactOS-x86_32/build-me
 
 **Standalone — this repository only**
 
-Sibling directories are auto-detected. Just run:
+Sibling directories are auto-detected from their default relative paths:
 
 ```sh
-make      # auto-detects all siblings + packs cctkfs.img
+meson setup build-meson
+ninja -C build-meson stage   # gather siblings + pack cctkfs.img
+ninja -C build-meson ca      # re-stage just the CA bundle
+ninja -C build-meson purge   # clean
 ```
 
-Override any path if needed (see table below).
+Override any path with a Meson option (see table below).
 
-| Variable | Meaning |
+| Option | Meaning |
 |----------|---------|
-| **`CACTLIB_DIR`** | Root of **CactLib-x86_32** (must already contain **`clibc.so`**) |
-| **`CACTSOLE_BIN`** | Path to built **`cactsole`** |
-| **`CGOCT_BIN`** | Path to built **`cgoct`** |
-| **`USERBINS_MK`** | Directory of **CactUserBins-x86_32** (for **`make install`**) |
-| **`CACTSOLEINC`** | **`include/`** from **Cactsole-x86_32** |
-| **`LR_BIN`** / **`LR_SBIN`** | Staging dirs (e.g. **`lib/bin`** / **`lib/sbin`** under this repo) |
+| **`-Dcactlib_dir`** | Root of **CactLib-x86_32** (must already contain **`build-meson/clibc.so`**) |
+| **`-Dcactsole_bin`** | Path to built **`cactsole`** |
+| **`-Dcgoct_bin`** | Path to built **`cgoct`** |
+| **`-Duserbins_mk`** | Directory of **CactUserBins-x86_32** (its **`stage`** target is invoked) |
+| **`-Dcactsoleinc`** | **`include/`** from **Cactsole-x86_32** |
 
 **Prerequisites**
 
 | Requirement | Notes |
 |-------------|-------|
 | **`python3`** | Runs **`pack_cctkfs.py`** |
-| **`lib/*.cctk`** | **Mandatory** — install drivers first (see table below) |
+| **`lib/*.cctk`** | **Mandatory** — install drivers first (see below) |
 
-**Driver install** (auto-detects siblings by default):
+**Driver install** (each driver's own **`stage`** target copies into **`lib/`**):
 
 ```sh
-make -C ../AHCI-for-Cact install
-make -C ../NVMe-for-Cact install
-make -C ../Virtio-net-for-Cact install
-make -C ../Yukon-for-Cact install
+ninja -C ../AHCI-for-Cact-x86_32/build-meson stage
+ninja -C ../NVMe-for-Cact-x86_32/build-meson stage
+ninja -C ../Virtio-net-for-Cact-x86_32/build-meson stage
+ninja -C ../Yukon-for-Cact-x86_32/build-meson stage
 ```
 
 **Pack the image**
 
 ```sh
-make      # auto-detects all paths
-make clean
+ninja -C build-meson stage
+ninja -C build-meson purge
+```
 
 ---
 
@@ -110,14 +114,16 @@ make clean
 
 ```
 LocalRepoCactOS/
-├── meson.build           # sibling paths arrive as -D options; stage/purge targets
+├── meson.build           # sibling paths arrive as -D options; stage/ca/purge targets
 ├── LICENSE
 ├── tools/
 │   ├── cctkfs.h          # on-disk layout (shared idea with kernel reader)
-│   └── pack_cctkfs.py    # packs lib/ → cctkfs.img
-├── lib/                  # populated by driver installs + make targets
+│   ├── pack_cctkfs.py    # packs lib/ → cctkfs.img (progress bar / -v)
+│   └── cact_sign.py      # appends the HMAC-SHA256 tag to a .cctk
+├── lib/                  # populated by the drivers' stage targets + -D options
 │   ├── *.cctk
 │   ├── clibc.so
+│   ├── ca-certificates.crt
 │   ├── bin/
 │   └── sbin/
 ├── src/                  # optional mirrors of driver sources
@@ -157,5 +163,5 @@ LocalRepoCactOS/
 
 | Rule | Why |
 |------|-----|
-| **Syscall numbers** must match **libc** and the kernel | **`syscall.h`** is the contract — bump **CactLib**, then relink **cgoct**, **cactsole**, **CactUserBins** |
+| **ABI** must match **libc** and the kernel | **`syscall.h`** (15 traps) and **`ioctl_abi.h`** are the contract — bump **CactLib**, then relink **cgoct**, **cactsole**, **CactUserBins** |
 | **`/bin/init` is cgoct** | The kernel’s first ELF task is **`bin/init`**; keep this staging rule when swapping supervisors |
