@@ -141,6 +141,19 @@ _script_xfbdev = (
   'cp -f "' + xfbdev_bin + '" "' + sbin_dir + '/xfbdev"; fi; '
 )
 
+# Trust anchors for the TLS client.  /etc lives on the (ext4-backed) boot disk,
+# so the image carries the default under /lib: libc looks in
+# /etc/ca-certificates.crt first and falls back to /lib/ca-certificates.crt.
+# That way the anchors update with a package on a booted system instead of
+# needing a kernel or image rebuild.
+_script_ca = (
+  'for src in /etc/ssl/certs/ca-certificates.crt ' +
+             '/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem ' +
+             '/etc/ssl/cert.pem; do ' +
+  'if [ -f "$src" ]; then cp -fL "$src" "' + lib_dir + '/ca-certificates.crt"; ' +
+  'echo "staged CA bundle: $src"; break; fi; done; '
+)
+
 # sign + pack: the Makefile's $(OUT_IMG) rule.
 _script_pack = (
   'cctk=$(ls "' + lib_dir + '"/*.cctk 2>/dev/null || true); ' +
@@ -167,7 +180,12 @@ run_target('userbins',
 run_target('stage',
   command: [bash, '-c', 'set -e; ' + _script_daemons + _script_userbins +
             _script_cactpkg + _script_cactinst +
-            _script_libs + _script_bin + _script_xfbdev + _script_pack])
+            _script_libs + _script_bin + _script_xfbdev + _script_ca +
+            _script_pack])
+
+# Trust anchors on their own, for when only the bundle changed.
+run_target('ca',
+  command: [bash, '-c', 'set -e; ' + _script_ca])
 
 # Meson reserves "clean" (as it does "install"/"test"), hence "purge".
 run_target('purge',
