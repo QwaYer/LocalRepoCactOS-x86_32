@@ -84,7 +84,7 @@ _soleinc_opt = '-Dcactsoleinc="' + cactsoleinc + '"'
 
 # Daemons and network helpers: they all take cactlib + lr_sbin.
 _daemon_names = ['logd', 'devd', 'netd', 'powerd', 'quirkd', 'resolved', 'seatd',
-                 'audiod', 'wifid', 'networkd', 'dhcpd']
+                 'audiod', 'wifid', 'dhcpd']
 
 _script_daemons = ''
 foreach d : _daemon_names
@@ -118,7 +118,7 @@ endif
 # Staging helpers
 # ------------------------------------------------------------------------------
 
-# libs: the shared CactLibc objects the image serves as /lib/*.so
+# libs: the shared CactLibc objects the image serves as /usr/lib/*.so
 _script_libs = (
   'mkdir -p "' + lib_dir + '"; ' +
   'cp -f "' + libc_so_src + '" "' + lib_dir + '/clibc.so"; ' +
@@ -142,16 +142,37 @@ _script_xfbdev = (
 )
 
 # Trust anchors for the TLS client.  /etc lives on the (ext4-backed) boot disk,
-# so the image carries the default under /lib: libc looks in
-# /etc/ca-certificates.crt first and falls back to /lib/ca-certificates.crt.
-# That way the anchors update with a package on a booted system instead of
-# needing a kernel or image rebuild.
+# so the image carries the default under /usr/share: libc looks in
+# /etc/ssl/certs/ca-certificates.crt first and falls back to the image copy at
+# /usr/share/ca-certificates/ca-certificates.crt.  That way the anchors update
+# with a package on a booted system instead of needing a kernel or image rebuild.
 _script_ca = (
   'for src in /etc/ssl/certs/ca-certificates.crt ' +
              '/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem ' +
              '/etc/ssl/cert.pem; do ' +
   'if [ -f "$src" ]; then cp -fL "$src" "' + lib_dir + '/ca-certificates.crt"; ' +
   'echo "staged CA bundle: $src"; break; fi; done; '
+)
+
+# Wi-Fi firmware.  Firmware is taken ONLY from Firmware-for-Cact-x86/lib/firmware
+# and staged through this repo into the image, uncompressed, so the packer places
+# it at /usr/lib/firmware/<name> for the kernel's request_firmware() to read.
+_fw_dir = siblings / 'Firmware-for-Cact-x86' / 'lib' / 'firmware'
+
+_zstd = find_program('zstd', required: false)
+
+_script_fw = 'mkdir -p "' + lib_dir + '/firmware"; '
+if _zstd.found()
+  _script_fw += (
+    'if [ -f "' + _fw_dir + '/rt2870.bin" ]; then ' +
+    'cp -f "' + _fw_dir + '/rt2870.bin" "' + lib_dir + '/firmware/rt2870.bin"; ' +
+    'elif [ -f "' + _fw_dir + '/rt2870.bin.zst" ]; then ' +
+    _zstd.full_path() + ' -dc "' + _fw_dir + '/rt2870.bin.zst" > "' +
+    lib_dir + '/firmware/rt2870.bin"; fi; ')
+endif
+_script_fw += (
+  'if [ ! -f "' + lib_dir + '/firmware/rt2870.bin" ]; then ' +
+  'echo "WARN: rt2870.bin not found in ' + _fw_dir + '" >&2; fi; '
 )
 
 # sign + pack: the Makefile's $(OUT_IMG) rule.
@@ -181,7 +202,7 @@ run_target('stage',
   command: [bash, '-c', 'set -e; ' + _script_daemons + _script_userbins +
             _script_cactpkg + _script_cactinst +
             _script_libs + _script_bin + _script_xfbdev + _script_ca +
-            _script_pack])
+            _script_fw + _script_pack])
 
 # Trust anchors on their own, for when only the bundle changed.
 run_target('ca',

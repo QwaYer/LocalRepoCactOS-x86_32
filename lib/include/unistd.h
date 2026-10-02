@@ -29,6 +29,7 @@ typedef unsigned dev_t;
 #define RB_AUTOBOOT  0x01234567
 #define RB_HALT_SYSTEM 0xCDEF0123
 #define RB_POWER_OFF 0x4321FEDC
+#define RB_SUSPEND   0x53555350
 
 /* ── process lifecycle ── */
 ssize_t read(int fd, void *buf, size_t count);
@@ -37,8 +38,10 @@ int     close(int fd);
 pid_t   fork(void);
 int     execve(const char *pathname, char *const argv[], char *const envp[]);
 pid_t   getpid(void);
+pid_t   gettid(void);
+void    __cact_pid_init(void);
 pid_t   getppid(void);
-void    _exit(int status);
+void    _exit(int status) __attribute__((noreturn));
 pid_t   waitpid(pid_t pid, int *status, int options);
 unsigned int sleep(unsigned int seconds);
 int     usleep(unsigned int usec);
@@ -66,7 +69,7 @@ int     pipe2(int pipefd[2], int flags);
 void   *sbrk(int increment);
 int     brk(void *addr);
 
-/* ── filesystem ── */
+/* ── file system ── */
 char   *getcwd(char *buf, int size);
 int     chdir(const char *path);
 int     chroot(const char *path);
@@ -92,7 +95,7 @@ int     mount(const char *src, const char *target, const char *fstype,
 int     umount(const char *target);
 int     reboot(int cmd);
 
-/* ── loading kernel PCI modules (euid 0 only) ── */
+/* ── kernel PCI module loading (euid 0 only) ── */
 /* vendor_id & device_id both (unsigned)-1: kernel reads cact_pci_* from the module ELF */
 extern char **environ;
 

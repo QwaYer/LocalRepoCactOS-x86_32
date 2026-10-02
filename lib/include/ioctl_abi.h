@@ -25,6 +25,7 @@
 //   CACT_TIMERFDCTL_* 0x3A00 ioctl on /dev/timerfd      -> timerfd_create
 //   CACT_SIGNALFDCTL_* 0x3B00 ioctl on /dev/signalfd    -> signalfd_create
 //   CACT_EPOLLCTL_*   0x3C00 ioctl on /dev/epoll        -> epoll_create
+//   CACT_WLANCTL_*    0x3F00 ioctl on /dev/wlan0        -> raw 802.11 radio
 // Device-specific ioctls (FB/TIOC, ...) keep their legacy numbers and are
 // routed straight to the node's own ops; they must stay outside 0x3000-0x3FFF.
 //
@@ -145,6 +146,10 @@ typedef struct cact_proc_info {
 // /proc/time — binary read-only (8 bytes), monotonic since boot.
 typedef struct cact_time { uint32_t sec; uint32_t usec; } cact_time_t;
 
+// /proc/wallclock — binary read-only, same cact_time_t layout: civil time,
+// seconds since the Unix epoch, taken from the CMOS RTC read at boot.  This is
+// what CLOCK_REALTIME/gettimeofday()/time() report; /proc/time stays monotonic.
+
 // /proc/uname — binary read-only, layout matches struct utsname (Linux i386).
 typedef struct cact_uname {
     char sysname[65];
@@ -175,6 +180,29 @@ typedef struct cact_uname {
 #define CACT_PROCCTL_SHMAT       0x320F  // self; arg=cact_shmat_arg_t* -> addr
 #define CACT_PROCCTL_SHMDT       0x3210  // self; arg=uint32_t* addr
 #define CACT_PROCCTL_SHMCTL      0x3211  // self; arg=cact_shmctl_arg_t*
+#define CACT_PROCCTL_THREAD_CREATE 0x3212 // self; arg=cact_thread_create_arg_t*; returns tid
+#define CACT_PROCCTL_THREAD_EXIT 0x3213  // self; arg=uint32_t* exit code (may be NULL)
+#define CACT_PROCCTL_FUTEX       0x3214  // self; arg=cact_futex_arg_t*
+#define CACT_PROCCTL_GET_TID     0x3215  // self; arg=NULL; returns the calling task's tid
+
+typedef struct cact_thread_create_arg {
+    void*    entry;      // user entry point (called as entry(arg))
+    uint32_t user_esp;   // initial user stack pointer (libc lays out the frame)
+    uint32_t flags;      // reserved, 0
+    uint32_t tls;        // reserved, 0
+    uint32_t set_child_tid;   // kernel writes the new tid here before it runs (0 = none)
+    uint32_t clear_child_tid; // join futex word the kernel zeroes on exit (0 = none)
+} cact_thread_create_arg_t;
+
+#define CACT_FUTEX_WAIT 0
+#define CACT_FUTEX_WAKE 1
+
+typedef struct cact_futex_arg {
+    uint32_t uaddr;      // futex word, user VA
+    int32_t  op;         // CACT_FUTEX_WAIT | CACT_FUTEX_WAKE
+    int32_t  val;        // WAIT: expected value; WAKE: count
+    int32_t  timeout_ms; // WAIT: <= 0 means wait forever
+} cact_futex_arg_t;
 
 typedef struct cact_pgid_arg { uint32_t pid; uint32_t pgid; } cact_pgid_arg_t;
 typedef struct cact_signal_arg { uint32_t pid; uint32_t signum; } cact_signal_arg_t;
@@ -202,10 +230,13 @@ typedef struct cact_shmctl_arg { uint32_t shmid; uint32_t cmd; void *buf; } cact
 #define CACT_SOCKCTL_UNIX_CONNECT 0x330B // AF_UNIX connect: arg=cact_unix_addr_t*
 #define CACT_SOCKCTL_SENDMSG    0x330C  // payload + SCM_RIGHTS: arg=cact_sendmsg_arg_t*
 #define CACT_SOCKCTL_RECVMSG    0x330D  // payload + SCM_RIGHTS: arg=cact_recvmsg_arg_t*
+#define CACT_SOCKCTL_GETSOCKNAME 0x330E // arg=cact_sockname_arg_t*; local addr out
+#define CACT_SOCKCTL_GETPEERNAME 0x330F // arg=cact_sockname_arg_t*; peer addr out
 // AF_UNIX reuses CACT_SOCKCTL_LISTEN / ACCEPT / SHUTDOWN; data path is plain
 // read()/write() as for AF_INET sockets.  sendmsg/recvmsg ioctls add SCM_RIGHTS
 // fd passing on AF_UNIX stream sockets (payload stays a byte stream; passed fds
 // arrive as an ordered FIFO alongside it).
+//
 
 typedef struct cact_sockaddr_in {
     uint32_t addr;   // IPv4 big-endian
@@ -249,6 +280,13 @@ typedef struct cact_accept_arg {
     uint32_t addrlen;            // in/out
 } cact_accept_arg_t;
 
+// getsockname()/getpeername(): the kernel fills addr, and addrlen is in (bytes
+// the caller's buffer can hold) then out (bytes written), like accept's.
+typedef struct cact_sockname_arg {
+    cact_sockaddr_in_t addr;     // out
+    uint32_t addrlen;            // in/out
+} cact_sockname_arg_t;
+
 // socket option levels/names (kernel socket.h values; relay passes them through)
 //   level: SOL_SOCKET=1, IPPROTO_TCP=6
 //   SOL_SOCKET names: SO_REUSEADDR=2, SO_KEEPALIVE=9, SO_ERROR=4
@@ -272,6 +310,7 @@ typedef struct cact_recvfrom_arg {
     uint32_t len;
 } cact_recvfrom_arg_t;
 
+
 // ===========================================================================
 // /dev/net control. RANGE 0x3400.
 // ===========================================================================
@@ -281,10 +320,30 @@ typedef struct cact_recvfrom_arg {
 #define CACT_NETCTL_NETCFG       0x3404  // arg=cact_netcfg_arg_t* (root): set link config
 #define CACT_NETCTL_SOCKETPAIR   0x3405  // arg=cact_socketpair_arg_t*; fds[2] out
 #define CACT_NETCTL_NETCFG_GET   0x3406  // arg=cact_netcfg_get_t* (out): read link config
+#define CACT_NETCTL_PING_WAIT    0x3407  // arg=cact_ping_wait_arg_t*; returns RTT us or <0
+#define CACT_NETCTL_IFNAME       0x3408  // arg=char[CACT_IFNAME_MAX] (out): NIC name, -ENODEV if none
+
+// Interface name as the driver registered it ("eth0", "wlan0").  A separate
+// ioctl rather than a field in cact_netcfg_get_t so that binaries built against
+// the older struct keep working: the kernel copies exactly CACT_IFNAME_MAX
+// bytes, so a caller must pass a buffer of at least that size.
+#define CACT_IFNAME_MAX          16
 
 typedef struct cact_socket_arg { uint32_t domain; uint32_t type; uint32_t proto; } cact_socket_arg_t;
 typedef struct cact_socketpair_arg { uint32_t type; uint32_t fds[2]; } cact_socketpair_arg_t;
 typedef struct cact_ping_arg { uint32_t dst_ip; uint32_t id; uint32_t seq; } cact_ping_arg_t;
+// Blocking probe: send one echo request and wait for its reply.  Returns the
+// round-trip time in microseconds, or <0 on timeout.  The out fields describe
+// the reply (source address in host order, ICMP message length in bytes).
+typedef struct cact_ping_wait_arg {
+    uint32_t dst_ip;      // host order
+    uint32_t id;
+    uint32_t seq;
+    uint32_t timeout_ms;
+    uint32_t rtt_us_out;
+    uint32_t src_ip_out;  // host order
+    uint32_t bytes_out;
+} cact_ping_wait_arg_t;
 typedef struct cact_dns_arg { char *name; uint32_t *out_ip; } cact_dns_arg_t;
 
 // Link configuration set by the network manager.  ip_host/mask 0 removes the
@@ -315,6 +374,7 @@ typedef struct cact_netcfg_get {
 #define CACT_SYSCTL_MODULE_LOAD  0x3504  // arg=cact_module_arg_t*
 #define CACT_SYSCTL_MODULE_UNLOAD 0x3505 // arg=char* name
 #define CACT_SYSCTL_BLKDEV_RESCAN 0x3506 // arg=char* disk name; returns #partitions
+#define CACT_SYSCTL_SETHOSTNAME   0x3507 // arg=char* name (root): set the host name
 
 typedef struct cact_mount_arg { char *src; char *target; char *fstype; } cact_mount_arg_t;
 typedef struct cact_module_arg { char *path; uint32_t vendor_id; uint32_t device_id; } cact_module_arg_t;
@@ -346,6 +406,21 @@ typedef struct cact_module_arg { char *path; uint32_t vendor_id; uint32_t device
 #define CACT_CRYPTCTL_AEAD        0x3706  // arg=cact_crypt_aead_arg_t*
 #define CACT_CRYPTCTL_KX_KEYGEN   0x3707  // arg=cact_crypt_kx_keygen_arg_t*
 #define CACT_CRYPTCTL_KX_DERIVE   0x3708  // arg=cact_crypt_kx_derive_arg_t*
+#define CACT_CRYPTCTL_SIG_VERIFY  0x3709  // arg=cact_crypt_sig_verify_arg_t*
+                                          // returns 0 valid, -1 invalid, -EINVAL bad args
+#define CACT_CRYPTCTL_X509_VERIFY  0x370A  // arg=cact_crypt_x509_verify_arg_t*
+                                          // returns 0 valid, -1 invalid, -EINVAL bad args
+
+// signature schemes for CACT_CRYPTCTL_SIG_VERIFY (order matches Cact_SIG_* in
+// cact_crypto/src/sig.rs)
+#define CACT_SIG_ECDSA_P256_SHA256 0
+#define CACT_SIG_ECDSA_P384_SHA384 1
+#define CACT_SIG_RSA_PKCS1_SHA256  2
+#define CACT_SIG_RSA_PKCS1_SHA384  3
+#define CACT_SIG_RSA_PKCS1_SHA512  4
+#define CACT_SIG_RSA_PSS_SHA256    5
+#define CACT_SIG_RSA_PSS_SHA384    6
+#define CACT_SIG_RSA_PSS_SHA512    7
 
 // algorithm selectors
 #define CACT_CRYPT_SHA256     0   // hash / hmac / hkdf: SHA-256 family
@@ -426,6 +501,42 @@ typedef struct cact_crypt_kx_derive_arg {
     uint8_t peer_pub[65]; // in: X25519 32 bytes / P-256 65 bytes (uncompressed)
     uint8_t shared[32];   // out
 } cact_crypt_kx_derive_arg_t;
+
+// Signature verification.  `pubkey` is the key exactly as a certificate carries
+// it — the SubjectPublicKeyInfo subjectPublicKey contents: a SEC1 point for
+// ECDSA, a DER RSAPublicKey for RSA.  `msg` is hashed internally with the
+// scheme's digest, so callers pass the message, not a prehash.
+typedef struct cact_crypt_sig_verify_arg {
+    uint32_t scheme;              // CACT_SIG_*
+    const uint8_t *pubkey;        // in
+    uint32_t pubkey_len;
+    const uint8_t *msg;           // in
+    uint32_t msg_len;
+    const uint8_t *sig;           // in (DER for ECDSA, raw for RSA)
+    uint32_t sig_len;
+} cact_crypt_sig_verify_arg_t;
+
+// Certificate chain verification (rustls-webpki in the kernel).  `chain` and
+// `roots` are buffers of concatenated DER certificates (each self-delimiting);
+// the leaf comes first in `chain`, and `roots` are the trust anchors the caller
+// wants to accept — the kernel keeps no trust policy of its own.
+//
+// `tls_scheme` != 0 additionally requires `hs_sig` to be a valid signature over
+// `hs_msg` made with the leaf's key, which is how a TLS 1.3 client checks the
+// server's CertificateVerify message.
+typedef struct cact_crypt_x509_verify_arg {
+    const uint8_t *chain;      // in: concatenated DER, leaf first
+    uint32_t chain_len;
+    const uint8_t *roots;      // in: concatenated DER trust anchors
+    uint32_t roots_len;
+    const char    *hostname;   // in: NUL-terminated name the leaf must match
+    uint64_t unix_time;        // in: verification time, seconds since epoch
+    uint32_t tls_scheme;       // in: TLS SignatureScheme code, 0 = skip
+    const uint8_t *hs_msg;     // in: signed handshake message
+    uint32_t hs_msg_len;
+    const uint8_t *hs_sig;     // in
+    uint32_t hs_sig_len;
+} cact_crypt_x509_verify_arg_t;
 
 // ===========================================================================
 // /dev/memfd control. RANGE 0x3800.
@@ -548,5 +659,71 @@ typedef struct cact_vt_state {
 // ===========================================================================
 #define CACT_PTYCTL_GET_NUMBER  0x3E00  // master: arg=int* -> pts number
 #define CACT_PTYCTL_LOCK        0x3E01  // master: arg=int* -> 1 lock, 0 unlock the slave
+
+// ===========================================================================
+// Wireless control (ioctls on /dev/wlan0). RANGE 0x3F00.
+//
+// The driver is a dumb radio: it scans and keeps the AP list (served as text by
+// read()), moves raw 802.11 frames both ways, and runs the 802.11<->802.3
+// datapath with the CCMP keys it is given.  Association / authentication / WPA2
+// live in userspace (the wljoin utility), which drives this interface.
+// ===========================================================================
+#define CACT_WLANCTL_SCAN        0x3F00  // arg=NULL;          rescan, returns AP count
+#define CACT_WLANCTL_TX          0x3F01  // arg=cact_wlan_frame_t*   (raw 802.11 MPDU)
+#define CACT_WLANCTL_RX          0x3F02  // arg=cact_wlan_frame_t*   (out; len 0 = empty)
+#define CACT_WLANCTL_SET_CHANNEL 0x3F03  // arg=cact_wlan_channel_t*
+#define CACT_WLANCTL_SET_BSSID   0x3F04  // arg=cact_wlan_bssid_t*
+#define CACT_WLANCTL_SET_KEY     0x3F05  // arg=cact_wlan_key_t*
+#define CACT_WLANCTL_STATUS      0x3F06  // arg=cact_wlan_status_t*  (out)
+#define CACT_WLANCTL_SET_LINK    0x3F07  // arg=int*   1 = datapath up, 0 = down
+#define CACT_WLANCTL_SET_RATES   0x3F08  // arg=cact_wlan_rates_t*   (AP basic rates + ERP)
+
+#define CACT_WLAN_FRAME_MAX  2312   // max 802.11 MPDU
+#define CACT_WLAN_SSID_MAX   33
+#define CACT_WLAN_KEY_MAX    32
+
+#define CACT_WLAN_KEY_PAIRWISE 0    // TK: enables the CCMP data path
+#define CACT_WLAN_KEY_GROUP    1    // GTK: group-addressed frames
+
+// cact_wlan_rates_t.flags — what the AP's beacon says about these timings.
+#define CACT_WLAN_ERP_SHORT_PREAMBLE 0x0001  // use the short preamble
+#define CACT_WLAN_ERP_CTS_PROT       0x0002  // AP wants CTS-to-self protection
+#define CACT_WLAN_ERP_SHORT_SLOT     0x0004  // 9 us slot, else 20 us
+
+typedef struct cact_wlan_frame {
+    uint32_t len;                          // in/out: bytes used in data[]
+    uint8_t  data[CACT_WLAN_FRAME_MAX];    // raw 802.11 frame (no FCS)
+} cact_wlan_frame_t;
+
+typedef struct cact_wlan_channel { uint32_t channel; } cact_wlan_channel_t;
+typedef struct cact_wlan_bssid   { uint8_t  bssid[6]; } cact_wlan_bssid_t;
+
+// What the AP's beacon advertises: the basic-rate set (the rates management
+// frames and EAPOL must use) and the ERP timings.  Taken from the beacon's
+// information elements by wljoin and programmed before the first frame goes
+// out, mirroring mac80211's BSS_CHANGED_BASIC_RATES/ERP handling.
+typedef struct cact_wlan_rates {
+    uint16_t basic;                        // bit0=1M, 1=2M, 2=5.5M, 3=11M,
+                                           // 4=6M, 5=9M, 6=12M, 7=18M, 8=24M,
+                                           // 9=36M, 10=48M, 11=54M; 0 = unknown
+    uint16_t flags;                        // CACT_WLAN_ERP_*
+} cact_wlan_rates_t;
+
+typedef struct cact_wlan_key {
+    uint32_t kind;                         // CACT_WLAN_KEY_*
+    uint32_t key_id;                       // GTK key id (0 for the pairwise key)
+    uint32_t key_len;
+    uint8_t  key[CACT_WLAN_KEY_MAX];
+} cact_wlan_key_t;
+
+typedef struct cact_wlan_status {
+    int32_t  linked;                       // 1 = datapath usable
+    uint8_t  mac[6];                       // this station's MAC (SA for auth/assoc)
+    uint8_t  bssid[6];
+    uint32_t channel;
+    uint8_t  ssid[CACT_WLAN_SSID_MAX];
+    int32_t  last_error;                   // -errno of the last failure (0 = none);
+                                           // the only channel for bring-up errors
+} cact_wlan_status_t;
 
 #endif
