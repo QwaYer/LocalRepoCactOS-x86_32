@@ -2,14 +2,22 @@
 """Pack LocalRepoCactOS/lib into a flat cctkfs image consumed by the Cact
 kernel.
 
-Directory layout (lib_dir):
-  lib/*.cctk        → /lib/<name>.cctk    (PCI driver modules)
-  lib/*.so          → /lib/<name>.so      (shared libraries)
-  lib/*.o           → /lib/<name>.o       (object files, e.g. start.o)
-  lib/*.a           → /lib/<name>.a       (static archives)
-  lib/bin/*         → /bin/<name>         (user ELF)
-  lib/sbin/*        → /sbin/<name>        (priv/net tools)
-  lib/<rest>        → /<rest>             (anything else, e.g. include/, usr/)
+Directory layout (lib_dir → archive path, usrmerge + FHS):
+  lib/bin/*             → /usr/bin/*             (user ELF)
+  lib/sbin/*            → /usr/sbin/*            (priv/net tools)
+  lib/firmware/*        → /usr/lib/firmware/*    (request_firmware blobs)
+  lib/include/*         → /usr/include/*         (headers)
+  lib/cactpkg/*         → /usr/lib/cactpkg/*     (package payload)
+  lib/cact-install/*    → /usr/lib/cact-install/*(installer payload)
+  lib/*.cctk            → /usr/lib/modules/*.cctk(PCI driver modules)
+  lib/consolefont.psf   → /usr/share/consolefont.psf
+  lib/ca-certificates.crt → /usr/share/ca-certificates.crt
+  lib/<other>           → /usr/lib/<other>       (shared libs, ld.so, *.o, *.a,
+                                                  and any other subdirectory)
+
+At runtime /usr is merged into the classic top level: /usr/bin, /usr/sbin and
+/usr/lib are served by binfs/sbinfs/libfs and the bare /bin, /sbin, /lib are
+symlinks to them (see mntfs_init in the kernel).
 
 Layout matches tools/cctkfs.h (little-endian, contiguous):
   cctkfs_hdr (32 B)
@@ -47,32 +55,49 @@ def fmt_size(n):
     return f"{n} B"
 
 
+# Top-level staging directories that map to a fixed archive prefix.
+DIR_MAP = {
+    "bin":          "/usr/bin",
+    "sbin":         "/usr/sbin",
+    "firmware":     "/usr/lib/firmware",
+    "include":      "/usr/include",
+    "cactpkg":      "/usr/lib/cactpkg",
+    "cact-install": "/usr/lib/cact-install",
+}
+
+# Loose files in lib/ that do not belong to /usr/lib.
+FILE_MAP = {
+    "consolefont.psf":     "/usr/share/consolefont.psf",
+    "ca-certificates.crt": "/usr/share/ca-certificates.crt",
+}
+
+KERNEL_MODULE_DIR = "/usr/lib/modules"
+
+
 def archive_path(lib_dir: Path, path: Path) -> str:
     """Map a file under lib_dir to its archive path in cctkfs."""
-    rel = path.relative_to(lib_dir)
-    parts = rel.parts
+    parts = path.relative_to(lib_dir).parts
 
-    # lib/bin/<name>  →  /bin/<name>
-    if len(parts) >= 2 and parts[0] == "bin":
-        return f"/bin/{'/'.join(parts[1:])}"
+    if parts[0] in DIR_MAP:
+        return f"{DIR_MAP[parts[0]]}/{'/'.join(parts[1:])}"
 
-    # lib/sbin/<name>  →  /sbin/<name>
-    if len(parts) >= 2 and parts[0] == "sbin":
-        return f"/sbin/{'/'.join(parts[1:])}"
-
-    # lib/<name>.cctk, lib/<name>.so, lib/<name>.o, lib/<name>.a  →  /lib/<name>
     if len(parts) == 1:
-        return f"/lib/{path.name}"
+        if path.name in FILE_MAP:
+            return FILE_MAP[path.name]
+        if path.suffix == ".cctk":
+            return f"{KERNEL_MODULE_DIR}/{path.name}"
+        return f"/usr/lib/{path.name}"
 
-    # lib/<rest>  →  /lib/<rest>
-    return f"/lib/{'/'.join(parts)}"
+    return f"/usr/lib/{'/'.join(parts)}"
 
 
 def group_of(arcname: str) -> str:
-    top = arcname.strip("/").split("/")[0]
-    if top == "lib" and arcname.endswith(".cctk"):
+    parts = arcname.strip("/").split("/")
+    if parts[:3] == ["usr", "lib", "modules"]:
         return "modules"
-    return top
+    if len(parts) >= 2 and parts[0] == "usr":
+        return parts[1]          # bin / sbin / lib / include / share
+    return parts[0]
 
 
 class Progress:

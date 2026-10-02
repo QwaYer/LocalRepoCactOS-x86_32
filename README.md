@@ -23,10 +23,11 @@
 |---|---|
 | **Output image** | **`cctkfs.img`** — flat archive, magic **`CKFS`** / version **1** ([`tools/cctkfs.h`](tools/cctkfs.h)) |
 | **Packer** | **`tools/pack_cctkfs.py`** — `python3 tools/pack_cctkfs.py [-v] lib/ cctkfs.img`; a live progress bar on a terminal, a line per 10% when the output is captured, and the full file table with **`-v`** ([`meson.build`](meson.build)) |
-| **Driver slot** | **`lib/*.cctk`** — at least **one** required or the **`stage`** target fails with an explicit error |
-| **Userspace staging** | **`lib/bin/*`** → archive **`/bin/*`** · **`lib/sbin/*`** → **`/sbin/*`** (from **CactUserBins** **`stage`**) |
+| **Driver slot** | **`lib/*.cctk`** — at least **one** required or the **`stage`** target fails with an explicit error; packed as **`/usr/lib/modules/<name>.cctk`** |
+| **Userspace staging** | **`lib/bin/*`** → archive **`/usr/bin/*`** · **`lib/sbin/*`** → **`/usr/sbin/*`** (from **CactUserBins** **`stage`**) |
 | **Dynamic libc** | **`lib/clibc.so`** — copied from **`<cactlib_dir>/build-meson/clibc.so`** (the **`cactlib_dir`** option, set by the integrator) |
 | **Bootstrap ELFs** | **`init`** (copy of **cgoct**), **`cactsole`**, **`cgoct`**, **`cactsole-rescue`** (copy of **cactsole**) |
+| **Merged layout** | userland is **usrmerge**: the kernel serves **`/usr/{bin,sbin,lib}`** and makes **`/bin`, `/sbin`, `/lib`** symlinks into them |
 
 ---
 
@@ -34,11 +35,11 @@
 
 | Piece | Role |
 |-------|------|
-| **[CactKernel-x86_32](https://github.com/QwaYer/CactKernel-x86_32)** | Parses the **`cctkfs`** module, stages **`cctkfs_stage[]`**, serves **GDD** / **pci_load_module**, **binfs** / **sbinfs** / **libfs** overlays |
+| **[CactKernel-x86_32](https://github.com/QwaYer/CactKernel-x86_32)** | Parses the **`cctkfs`** module, stages **`cctkfs_stage[]`**, serves **GDD** / **pci_load_module**, **binfs** / **sbinfs** / **libfs** / **usrfs** overlays |
 | **`*-for-Cact` driver repos** | Each **`ninja -C build-meson stage`** drops **`*.cctk`** into **`lib/`** here |
 | **[CactLib-x86_32](https://github.com/QwaYer/CactLibc-x86_32)** | Builds **`clibc.so`** consumed by staged ELFs |
-| **[Cgoct-x86_32](https://github.com/QwaYer/Cgoct-x86_32)** | **`/bin/init`** — userspace supervisor |
-| **[Cactsole-x86_32](https://github.com/QwaYer/Cactsole-x86_32)** | **`/bin/cactsole`** and **`/bin/cactsole-rescue`** (same binary, two names) |
+| **[Cgoct-x86_32](https://github.com/QwaYer/Cgoct-x86_32)** | **`/usr/bin/init`** — userspace supervisor |
+| **[Cactsole-x86_32](https://github.com/QwaYer/Cactsole-x86_32)** | **`/usr/bin/cactsole`** and **`/usr/bin/cactsole-rescue`** (same binary, two names) |
 | **[CactUserBins-x86_32](https://github.com/QwaYer/CactUserBins-x86_32)** | **`ninja -C build-meson stage`** fills **`lib/bin/`** and **`lib/sbin/`** |
 | **[CactOS-x86_32](https://github.com/QwaYer/CactOS-x86_32)** | **Workspace integrator** — drives **`ninja`** across libc, shells, userbins, drivers, this packer, kernel, **CactBridge** |
 
@@ -48,11 +49,15 @@
 
 | Source under `lib/` | Path inside the archive | Purpose |
 |---------------------|-------------------------|---------|
-| **`*.cctk`** | **`/lib/<name>.cctk`** | Relocatable **PCI** driver blobs (**ET_REL**), loaded via **GDD** |
-| **`*.so`** | **`/lib/<name>.so`** | Shared libs (**libfs** overlay), e.g. **`clibc.so`** |
-| **`ca-certificates.crt`** | **`/lib/ca-certificates.crt`** | Default **CA bundle** for the libc TLS client (libc looks in **`/etc/ca-certificates.crt`** first and falls back to this copy) |
-| **`bin/*`** | **`/bin/<name>`** | **init**, **cactsole**, **cgoct**, **cactsole-rescue**, plus all **CactUserBins** tools |
-| **`sbin/*`** | **`/sbin/<name>`** | Privileged / net helpers (**kill**, **su**, **modload**, **ping**, …) |
+| **`*.cctk`** | **`/usr/lib/modules/<name>.cctk`** | Relocatable **PCI** driver blobs (**ET_REL**), loaded via **GDD** |
+| **`*.so`** | **`/usr/lib/<name>.so`** | Shared libs (**libfs** overlay), e.g. **`clibc.so`** |
+| **`ca-certificates.crt`** | **`/usr/share/ca-certificates.crt`** | Default **CA bundle** for the libc TLS client (libc looks in **`/etc/ssl/certs/ca-certificates.crt`** first and falls back to this copy) |
+| **`consolefont.psf`** | **`/usr/share/consolefont.psf`** | PSF2 console font read by the kernel at boot |
+| **`firmware/*`** | **`/usr/lib/firmware/*`** | **request_firmware()** blobs (e.g. **`rt2870.bin`**) |
+| **`include/*`** | **`/usr/include/*`** | libc/cactsole headers |
+| **`bin/*`** | **`/usr/bin/<name>`** | **init**, **cactsole**, **cgoct**, **cactsole-rescue**, plus all **CactUserBins** tools |
+| **`sbin/*`** | **`/usr/sbin/<name>`** | Privileged / net helpers (**kill**, **su**, **modload**, **ping**, …) |
+| **`cactpkg/*`**, **`cact-install/*`** | **`/usr/lib/<area>/*`** | Offline package repo and installer payload |
 
 The packer sorts entries by **archive path**, then writes header + entry table + **NUL-separated** names (**8-byte** aligned) + payloads (**16-byte** aligned). See docstring in [`tools/pack_cctkfs.py`](tools/pack_cctkfs.py).
 
@@ -142,8 +147,8 @@ LocalRepoCactOS/
 2. Early **`init()`** (paging still off): **Multiboot2** parsing records the first module whose cmdline begins with **`cctkfs`**.
 3. **`pci_modblob_load(phys, size)`** copies the module into a static **`cctkfs_stage[]`** **`.bss`** buffer **before** **`pmm_init_from_mmap()`** / **`init_heap()`** so the heap cannot overwrite bootloader pages.
 4. **`pci_enumerate()`** drives **GDD** prompts for recognised devices.
-5. On confirm, **`pci_load_module("/lib/<name>.cctk", drv)`** resolves the path inside **`cctkfs_stage`**, copies the **ET_REL** image, applies relocations, calls **`pci_driver_probe(dev)`**.
-6. Userspace **`/bin/init`** (**cgoct**) expects **`/bin/cactsole`** (and optionally **`cactsole-rescue`**) on the overlay **`PATH`**.
+5. On confirm, **`pci_load_module("/usr/lib/modules/<name>.cctk", drv)`** resolves the path inside **`cctkfs_stage`**, copies the **ET_REL** image, applies relocations, calls **`pci_driver_probe(dev)`**.
+6. Userspace **`/usr/bin/init`** (**cgoct**) expects **`/usr/bin/cactsole`** (and optionally **`cactsole-rescue`**) on the overlay **`PATH`** (**`/usr/bin:/usr/sbin`**).
 
 ---
 
@@ -164,4 +169,4 @@ LocalRepoCactOS/
 | Rule | Why |
 |------|-----|
 | **ABI** must match **libc** and the kernel | **`syscall.h`** (15 traps) and **`ioctl_abi.h`** are the contract — bump **CactLib**, then relink **cgoct**, **cactsole**, **CactUserBins** |
-| **`/bin/init` is cgoct** | The kernel’s first ELF task is **`bin/init`**; keep this staging rule when swapping supervisors |
+| **`/usr/bin/init` is cgoct** | The kernel’s first ELF task is **`usr/bin/init`**; keep this staging rule when swapping supervisors |
