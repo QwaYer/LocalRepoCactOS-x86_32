@@ -1,48 +1,29 @@
 #!/usr/bin/env python3
-"""cact_sign.py — Sign .cctk ELF module with HMAC-SHA256.
+"""cact_sign.py — Sign a .cctk module with an ECDSA P-256 signature.
 
-Appends a 32-byte HMAC-SHA256 tag to the module file.
-The tag is computed as HMAC-SHA256(key, ELF data).
+Appends the module trailer (see CactKernel-x86_32/tools/modsign.py):
 
-The key is read from the kernel's hmac_key.bin
-(CactKernel-x86_32/Cact/crypto/hmac_ffi/hmac_key.bin) so it matches the
-kernel's Rust cact_hmac_verify(). Generate it with:
-  python3 CactKernel-x86_32/tools/gen_hmac_key.py
+    [ ELF ][ magic:4 = "CMOD" ][ vermagic:4 LE ][ signature:64 ]
+
+The build host signs with the private key (Cact/crypto/modsign/
+module_sign_priv.pem); the kernel verifies with the matching public key and
+refuses a module whose vermagic does not match its own ABI.  Idempotent: a
+module that already carries the trailer is left unchanged.
 """
 
 import os
 import sys
 from pathlib import Path
-import hmac
-import hashlib
-
-TAG_SIZE = 32
 
 
-def _key_path() -> str:
-    """Resolve the kernel hmac_key.bin relative to this script (a sibling repo)."""
+def _kernel_root() -> str:
+    """Resolve the sibling kernel repo (where the signing tools live)."""
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    return os.path.normpath(os.path.join(
-        script_dir, "..", "..", "CactKernel-x86_32", "Cact", "crypto", "hmac_ffi", "hmac_key.bin"))
+    return os.path.normpath(os.path.join(script_dir, "..", "..", "CactKernel-x86_32"))
 
 
-def _load_key() -> bytes:
-    path = _key_path()
-    try:
-        with open(path, "rb") as f:
-            key = f.read()
-    except FileNotFoundError:
-        print(f"HMAC key not found at {path}", file=sys.stderr)
-        print("Generate one with: python3 CactKernel-x86_32/tools/gen_hmac_key.py", file=sys.stderr)
-        sys.exit(1)
-    if len(key) != 32:
-        print(f"HMAC key must be exactly 32 bytes, got {len(key)}", file=sys.stderr)
-        sys.exit(1)
-    return key
-
-
-def sign(data: bytes) -> bytes:
-    return hmac.new(_load_key(), data, hashlib.sha256).digest()
+sys.path.insert(0, os.path.join(_kernel_root(), "tools"))
+import modsign  # noqa: E402
 
 
 def main():
@@ -54,20 +35,19 @@ def main():
     with open(path, "rb") as f:
         data = f.read()
 
-    # Skip if already signed with the same key
-    if len(data) >= TAG_SIZE:
-        elf_body = data[:-TAG_SIZE]
-        stored_tag = data[-TAG_SIZE:]
-        if sign(elf_body) == stored_tag:
-            print(f"cact_sign: {Path(path).name} — already signed")
-            sys.exit(0)
+    if modsign.already_signed(data):
+        print(f"cact_sign: {Path(path).name} — already signed")
+        sys.exit(0)
 
-    tag = sign(data)
+    if not os.path.isfile(modsign.PRIV_PEM):
+        modsign.generate_keys()
 
-    with open(path, "ab") as f:
-        f.write(tag)
+    signed = modsign.sign_module(modsign.PRIV_PEM, data)
+    with open(path, "wb") as f:
+        f.write(signed)
 
-    print(f"cact_sign: {Path(path).name} — signed (tag {tag.hex()[:8]})")
+    print(f"cact_sign: {Path(path).name} — signed "
+          f"(ECDSA P-256, vermagic 0x{modsign.vermagic():08x})")
     sys.exit(0)
 
 

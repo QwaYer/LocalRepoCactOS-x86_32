@@ -7,6 +7,9 @@ option('cactsole_bin', type: 'string', value: '../Cactsole-x86_32/build-meson/ca
 option('cgoct_bin', type: 'string', value: '../Cgoct-x86_32/build-meson/cgoct',
   description: 'built cgoct binary (staged as /usr/bin/init and /usr/bin/cgoct), relative or absolute')
 
+option('init_bin', type: 'string', value: '',
+  description: 'binary staged as /usr/bin/init (empty = cgoct_bin). The check image points this at cactcheck.')
+
 option('userbins_mk', type: 'string', value: '../CactUserBins-x86_32',
   description: 'CactUserBins project root, relative or absolute')
 

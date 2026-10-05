@@ -50,6 +50,12 @@ _sole = get_option('cactsole_bin')
 cactsole_bin = _sole.startswith('/') ? _sole : src_root / _sole
 _cgoct = get_option('cgoct_bin')
 cgoct_bin = _cgoct.startswith('/') ? _cgoct : src_root / _cgoct
+# /usr/bin/init defaults to cgoct; a check image overrides it with the runner.
+_init = get_option('init_bin')
+init_bin = cgoct_bin
+if _init != ''
+  init_bin = _init.startswith('/') ? _init : src_root / _init
+endif
 _userbins = get_option('userbins_mk')
 userbins_mk = _userbins.startswith('/') ? _userbins : src_root / _userbins
 _soleinc = get_option('cactsoleinc')
@@ -126,10 +132,10 @@ _script_libs = (
 )
 
 # bin: init and the supervisor both come from cgoct; the shell doubles as the
-# rescue shell.
+# rescue shell.  A check image stages cactcheck as init instead.
 _script_bin = (
   'mkdir -p "' + bin_dir + '"; ' +
-  'cp -f "' + cgoct_bin + '" "' + bin_dir + '/init"; ' +
+  'cp -f "' + init_bin + '" "' + bin_dir + '/init"; ' +
   'cp -f "' + cgoct_bin + '" "' + bin_dir + '/cgoct"; ' +
   'cp -f "' + cactsole_bin + '" "' + bin_dir + '/cactsole"; ' +
   'cp -f "' + cactsole_bin + '" "' + bin_dir + '/cactsole-rescue"; '
