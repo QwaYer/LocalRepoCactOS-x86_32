@@ -6,13 +6,13 @@
   <img src="https://img.shields.io/badge/packer-Python%203-yellow.svg?style=for-the-badge" alt="Python 3">
   <img src="https://img.shields.io/badge/boot-Multiboot2%20module-purple.svg?style=for-the-badge" alt="Multiboot2 module">
   <img src="https://img.shields.io/badge/format-cctkfs%20v1-orange.svg?style=for-the-badge" alt="cctkfs v1">
-  <img src="https://img.shields.io/badge/signature-HMAC--SHA256-red.svg?style=for-the-badge" alt="HMAC-SHA256">
+  <img src="https://img.shields.io/badge/signature-ECDSA%20P--256-red.svg?style=for-the-badge" alt="ECDSA P-256">
 </p>
 
 <p align="center">
   Staging tree for <strong>out-of-tree PCI drivers</strong> (<strong><code>*.cctk</code></strong>) and <strong>early userspace</strong> ELFs, packed into one <strong><code>cctkfs.img</code></strong> archive.<br>
   GRUB loads it as a <strong>Multiboot2</strong> <strong><code>module2</code></strong>; the <strong>Cact</strong> kernel copies it into RAM <strong>before paging</strong> and overlays <strong><code>/lib</code></strong>, <strong><code>/bin</code></strong>, and <strong><code>/sbin</code></strong> on top of disk-backed VFS.<br>
-  <strong>2.0.0:</strong> all `.cctk` modules are now signed with <strong>HMAC-SHA256</strong> using the kernel's embedded static key. The last 32 bytes of each `.cctk` entry is the HMAC tag; the kernel verifies it before loading via `pci_load_module` (`pci_loader.c:111` `hmac_verify_module()`, Rust crate `cact_crypto`).
+  <strong>2.0.0:</strong> all `.cctk` modules are signed with an <strong>ECDSA P-256</strong> key pair. Each module carries a fixed trailer — magic `CMOD`, a 4-byte LE vermagic, then a 64-byte r‖s signature over `ELF || magic || vermagic`; the kernel verifies it with the embedded public key before loading (`mod_tag_verify()` in `Cact/kernel/elf/mod_tag.c`, Rust crate `cact_crypto`). The build host signs with `tools/modsign.py` via `tools/cact_sign.py`.
 </p>
 
 ---
@@ -124,7 +124,7 @@ LocalRepoCactOS/
 ├── tools/
 │   ├── cctkfs.h          # on-disk layout (shared idea with kernel reader)
 │   ├── pack_cctkfs.py    # packs lib/ → cctkfs.img (progress bar / -v)
-│   └── cact_sign.py      # appends the HMAC-SHA256 tag to a .cctk
+│   └── cact_sign.py      # appends the ECDSA P-256 trailer to a .cctk
 ├── lib/                  # populated by the drivers' stage targets + -D options
 │   ├── *.cctk
 │   ├── clibc.so
