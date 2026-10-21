@@ -5,7 +5,7 @@ kernel.
 Directory layout (lib_dir → archive path, usrmerge + FHS):
   lib/bin/*             → /usr/bin/*             (user ELF)
   lib/sbin/*            → /usr/sbin/*            (priv/net tools)
-  lib/firmware/*        → /usr/lib/firmware/*    (request_firmware blobs)
+  lib/firmware/*        → /usr/lib/firmware/*    (request_firmware blobs, *zst)
   lib/include/*         → /usr/include/*         (headers)
   lib/cactpkg/*         → /usr/lib/cactpkg/*     (package payload)
   lib/cact-install/*    → /usr/lib/cact-install/*(installer payload)

@@ -7,8 +7,10 @@ Appends the module trailer (see CactKernel-x86_32/tools/modsign.py):
 
 The build host signs with the private key (Cact/crypto/modsign/
 module_sign_priv.pem); the kernel verifies with the matching public key and
-refuses a module whose vermagic does not match its own ABI.  Idempotent: a
-module that already carries the trailer is left unchanged.
+refuses a module whose vermagic does not match its own ABI.  Idempotent per
+ABI: a module already signed for the current vermagic is left unchanged, while
+one carrying an older vermagic (signed before ksym.c changed) is stripped and
+re-signed, since the kernel would refuse it.
 """
 
 import os
@@ -35,9 +37,14 @@ def main():
     with open(path, "rb") as f:
         data = f.read()
 
-    if modsign.already_signed(data):
-        print(f"cact_sign: {Path(path).name} — already signed")
+    state = modsign.sign_state(data)
+    vm = modsign.vermagic()
+    if state == "current":
+        print(f"cact_sign: {Path(path).name} — already signed "
+              f"(vermagic 0x{vm:08x})")
         sys.exit(0)
+
+    was = modsign.trailer_vermagic(data)
 
     if not os.path.isfile(modsign.PRIV_PEM):
         modsign.generate_keys()
@@ -46,8 +53,12 @@ def main():
     with open(path, "wb") as f:
         f.write(signed)
 
-    print(f"cact_sign: {Path(path).name} — signed "
-          f"(ECDSA P-256, vermagic 0x{modsign.vermagic():08x})")
+    if state == "stale":
+        print(f"cact_sign: {Path(path).name} — re-signed: vermagic "
+              f"0x{was:08x} -> 0x{vm:08x}")
+    else:
+        print(f"cact_sign: {Path(path).name} — signed "
+              f"(ECDSA P-256, vermagic 0x{vm:08x})")
     sys.exit(0)
 
 
