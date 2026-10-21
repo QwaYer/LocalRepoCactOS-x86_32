@@ -47,19 +47,46 @@
 
 ## 📦 What goes into `cctkfs.img`
 
+`lib/` is **staging only**: **`ninja stage`** fills it from the sibling trees and
+nothing under it is ever committed (see [`.gitignore`](.gitignore)) — this
+repository owns no sources and carries no binaries.
+
 | Source under `lib/` | Path inside the archive | Purpose |
 |---------------------|-------------------------|---------|
 | **`*.cctk`** | **`/usr/lib/modules/<name>.cctk`** | Relocatable **PCI** driver blobs (**ET_REL**), loaded via **GDD** |
 | **`*.so`** | **`/usr/lib/<name>.so`** | Shared libs (**libfs** overlay), e.g. **`clibc.so`** |
 | **`ca-certificates.crt`** | **`/usr/share/ca-certificates.crt`** | Default **CA bundle** for the libc TLS client (libc looks in **`/etc/ssl/certs/ca-certificates.crt`** first and falls back to this copy) |
-| **`consolefont.psf`** | **`/usr/share/consolefont.psf`** | PSF2 console font read by the kernel at boot |
-| **`firmware/*`** | **`/usr/lib/firmware/*`** | **request_firmware()** blobs (e.g. **`rt2870.bin`**) |
-| **`include/*`** | **`/usr/include/*`** | libc/cactsole headers |
+| **`consolefont.psf`** | **`/usr/share/consolefont.psf`** | PSF2 console font read by the kernel at boot. Generated — CactKernel's **`tools/gen_consolefont.py`** renders it deterministically, so the image needs no vendored copy |
 | **`bin/*`** | **`/usr/bin/<name>`** | **init**, **cactsole**, **cgoct**, **cactsole-rescue**, plus all **CactUserBins** tools |
-| **`sbin/*`** | **`/usr/sbin/<name>`** | Privileged / net helpers (**kill**, **su**, **modload**, **ping**, …) |
-| **`cactpkg/*`**, **`cact-install/*`** | **`/usr/lib/<area>/*`** | Offline package repo and installer payload |
+| **`sbin/*`** | **`/usr/sbin/<name>`** | Privileged / net helpers (**kill**, **su**, **modload**, **ping**, **cact-install**, …) |
+| **`cactpkg/*`** | **`/usr/lib/cactpkg/repo/*`** | Offline **cactpkg** repository (base-system tools as `.cpkg`, versioned with the release) |
+| **`cact-install/*`** | **`/usr/lib/cact-install/*`** | Installer media — **`boot/kernel.bin`** + the **GRUB** stage files the installer deploys, staged by **`cact-install`**'s **`stage-media`** (after its **`grub-bundle`**, with the kernel already built). The **image itself is not here**: the kernel serves the boot module as **`/dev/cctkfs`** and `cact-install` reads it there, so it can never nest an image inside itself |
 
 The packer sorts entries by **archive path**, then writes header + entry table + **NUL-separated** names (**8-byte** aligned) + payloads (**16-byte** aligned). See docstring in [`tools/pack_cctkfs.py`](tools/pack_cctkfs.py).
+
+### The store and `localrepo.tar.zst`
+
+The store holds one thing: the **firmware mirror**. Every build wipes `store/`
+and re-populates it with `cp -al` (hard links — the mirror and the store share
+the same filesystem, so a 548 MiB tree is not duplicated), then
+**`ninja -C build-meson localrepo`** packs it into **`localrepo.tar.zst`** (a
+ustar image of `usr/…`, one zstd stream):
+
+| Source under `store/` | Path inside the archive | Why it is not in the image |
+|-----------------------|-------------------------|----------------------------|
+| **`usr/lib/firmware/*`** | **`/usr/lib/firmware/*`** | The whole mirror, ~548 MiB; pulled per-blob on demand |
+
+Blobs are copied **as-is** — the mirror ships `*.zst` (and `request_firmware()`
+tries **`<name>.zst`** before **`<name>`**), so re-compressing buys nothing; the
+archive's zstd level is low for the same reason. `tar` stores the mirror's
+symlinks (aliases) as symlink members, which **`firmextr` skips** — only the
+canonical files are reachable through the VFS.
+
+At boot **cgoct** copies the archive to **`/tmp/localrepo.tar.zst`** and
+**`firmextr`** streams members out of it (`firmextr usr/lib/firmware/rt2870.bin`)
+without unpacking the rest; `request_firmware()` then finds the extracted blob
+on the VFS. The tmpfs copy is released once the configured daemons are up
+(`localrepo_free` in `/etc/cgoct.conf`).
 
 ---
 

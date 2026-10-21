@@ -1,8 +1,13 @@
+# Everything under lib/ is staged by `ninja stage` (userland, drivers, the
+# cactpkg repository, the installer media, the console font).  This repository
+# owns no sources of its own, so nothing under lib/ is ever committed — these
+# are build products, and the repository is public.
+lib/
+
 *.img
 *.cctk
 *.o
-lib/bin/
-lib/sbin/
-lib/clibc.so
+localrepo.tar.zst
+store/
 
 build-meson/
